@@ -1842,49 +1842,40 @@ jobs:
           PY
 
       # BakaSU 的 Stable 版本（35205 / 9dbce02，2026-10-05）早于上游 2026-10-16 的
-      # module preinit 实现（BakaSU 提交 48f0f2a5）。而 SUSFS 补丁会在 fs/exec.c 注入
-      # preinit 钩子，导致 vmlinux 链接阶段失败：
+      # module preinit 实现（BakaSU 提交 48f0f2a5）。而 ABK 拉取的 SUSFS 补丁会在
+      # fs/exec.c 里调用 preinit 钩子，导致 vmlinux 链接阶段失败：
       #   ld.lld: error: undefined symbol: ksu_setup_preinit_file
       #   ld.lld: error: undefined symbol: ksu_preinit_handle_post_execveat
-      # 这里沿用 ABK 对 SukiSU 的既有处理方式补齐 stub：preinit 功能不可用，
-      # KSU / KPM / SUSFS / 其余特性均不受影响。
-      - name: 补齐 BakaSU preinit stub
+      # SUSFS 补丁本身提供了官方开关 KSU_NO_PREINIT：定义后那些 extern 声明与调用
+      # 会被整体编译掉，KSU 源码不需要任何改动（对比 SukiSU 路径的 stub 注入，
+      # 这里的做法不产生任何额外函数，运行期行为与上游"无 preinit 后端"完全一致）。
+      - name: 按 BakaSU 关闭 SUSFS preinit 钩子
         if: inputs.ksu_variant == 'BakaSU' && inputs.enable_susfs
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           set -euo pipefail
-          SELINUX_C="KernelSU/kernel/selinux/selinux.c"
-          if [ ! -f "$SELINUX_C" ]; then
-            SELINUX_C=$(find . -maxdepth 6 -path "*KernelSU/kernel/selinux/selinux.c" 2>/dev/null | head -1)
+          EXEC_C="common/fs/exec.c"
+          if [ ! -f "$EXEC_C" ]; then
+            EXEC_C=$(find . -maxdepth 6 -path "*/fs/exec.c" -not -path "*/tools/*" 2>/dev/null | head -1)
           fi
-          if [ -z "${SELINUX_C:-}" ] || [ ! -f "$SELINUX_C" ]; then
-            echo "::error::未找到 KernelSU selinux/selinux.c，无法补齐 preinit stub"
+          if [ -z "${EXEC_C:-}" ] || [ ! -f "$EXEC_C" ]; then
+            echo "::error::未找到内核 fs/exec.c"
             exit 1
           fi
-          if grep -qF "ksu_setup_preinit_file" "$SELINUX_C"; then
-            echo "preinit stub 已存在，跳过"
+          if ! grep -qF "KSU_NO_PREINIT" "$EXEC_C"; then
+            echo "当前补丁不包含 preinit 钩子，无需处理"
             exit 0
           fi
-          cat >> "$SELINUX_C" <<'STUB'
+          if grep -qxF "#define KSU_NO_PREINIT 1" "$EXEC_C"; then
+            echo "KSU_NO_PREINIT 已定义，跳过"
+            exit 0
+          fi
+          # 在文件最前面插入宏定义：exec.c 里的钩子都在文件后段，先定义即生效。
+          printf '#define KSU_NO_PREINIT 1\n' | cat - "$EXEC_C" > "$EXEC_C.tmp"
+          mv "$EXEC_C.tmp" "$EXEC_C"
+          echo "已在 $EXEC_C 定义 KSU_NO_PREINIT"
+          grep -n "KSU_NO_PREINIT" "$EXEC_C" | head -4
 
-          /* BakaSU 35205 尚无 preinit 后端；补齐 SUSFS GKI 钩子所需符号。 */
-          struct filename;
-          struct user_arg_ptr;
-
-          int ksu_setup_preinit_file(struct filename **filename_ptr, struct user_arg_ptr *argv_user)
-          {
-          	return -EINVAL;
-          }
-
-          int ksu_preinit_handle_post_execveat(int *fd, struct filename **filename_ptr,
-          				     void *argv_user, void *envp_user,
-          				     int *flags, int *retval, int *preinit_fd)
-          {
-          	return 0;
-          }
-          STUB
-          echo "已补齐 BakaSU preinit stub"
-          grep -n "ksu_setup_preinit_file" "$SELINUX_C"
 
       - name: 确保 KernelSU SUSFS ABI 兼容
         if: (inputs.ksu_variant == 'SukiSU' || inputs.ksu_variant == 'BakaSU') && inputs.enable_susfs
