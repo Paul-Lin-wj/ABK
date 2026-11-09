@@ -4181,6 +4181,30 @@ jobs:
       # cfs_rq / task_group 布局与约四千个导出符号校验和。此处应用 Droidspaces 作者的
       # kABI 补丁：pids 子系统追加到 CGROUP_SUBSYS_COUNT 之后，cfs_bandwidth 状态
       # 移到 task_group 尾部独立分配，task_group 的 KABI reserve 不占用。
+      - name: 克隆 cgroup 限额补丁仓库
+        if: inputs.droidspaces_cgroup_limits
+        env:
+          ABK_FEATURE_ID: cgroup_limits
+          ABK_FEATURE_END: "false"
+          ABK_FEATURE_FAILURE_MESSAGE: "cgroup limits patch download failed"
+        run: |
+          set -euo pipefail
+
+          patches_dir="$RUNNER_TEMP/cgroup-limits-patches"
+          rm -rf "$patches_dir"
+
+          # 钉到固定 commit，避免上游改动让同一天两次构建产物不一致。
+          python3 "$GITHUB_WORKSPACE/.github/scripts/cached-downloads.py" clone \
+            https://github.com/Goldzxcbug/Droidspaces_Kernel_patch.git "$patches_dir" \
+            --ref dc0f76bedd790b7738e5695509297ee71ca4a2c2 --depth 1
+
+          [ -d "$patches_dir/cgroup_limits" ] || {
+            echo "::error::补丁仓库缺少 cgroup_limits 目录"
+            exit 1
+          }
+          echo "CGROUP_LIMITS_PATCHES=$patches_dir/cgroup_limits" >> $GITHUB_ENV
+          git -C "$patches_dir" log -1 --oneline
+
       - name: 应用 cgroup 限额 kABI 补丁 (Droidspaces)
         if: inputs.droidspaces_cgroup_limits
         env:
@@ -4192,7 +4216,7 @@ jobs:
           set -euo pipefail
 
           KERNEL_VER="${{ inputs.kernel_version }}"
-          PATCH_DIR=/tmp/Droidspaces_Kernel_patch/cgroup_limits
+          PATCH_DIR="${CGROUP_LIMITS_PATCHES:?缺少 CGROUP_LIMITS_PATCHES}"
 
           case "$KERNEL_VER" in
             6.1) PATCH="$PATCH_DIR/fix_cgroup_limits_kabi_6.1.141.patch" ;;
