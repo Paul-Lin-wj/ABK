@@ -4194,9 +4194,14 @@ jobs:
           rm -rf "$patches_dir"
 
           # 钉到固定 commit，避免上游改动让同一天两次构建产物不一致。
-          python3 "$GITHUB_WORKSPACE/.github/scripts/cached-downloads.py" clone \
-            https://github.com/Goldzxcbug/Droidspaces_Kernel_patch.git "$patches_dir" \
-            --ref dc0f76bedd790b7738e5695509297ee71ca4a2c2 --depth 1
+          # cached-downloads.py clone --ref 走 git clone --branch，只接受分支/标签，
+          # 传 commit SHA 会被 git 拒绝，所以这里直接 fetch SHA。
+          git init -q "$patches_dir"
+          git -C "$patches_dir" remote add origin \
+            https://github.com/Goldzxcbug/Droidspaces_Kernel_patch.git
+          git -C "$patches_dir" fetch -q --depth 1 origin \
+            dc0f76bedd790b7738e5695509297ee71ca4a2c2
+          git -C "$patches_dir" checkout -q FETCH_HEAD
 
           [ -d "$patches_dir/cgroup_limits" ] || {
             echo "::error::补丁仓库缺少 cgroup_limits 目录"
