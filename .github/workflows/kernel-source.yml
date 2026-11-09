@@ -104,11 +104,6 @@ on:
         required: true
         type: boolean
         default: false
-      droidspaces_cgroup_limits:
-        description: "启用 cgroup 限额 kABI 补丁（Droidspaces CPU/进程数限制）"
-        required: true
-        type: boolean
-        default: false
       cancel_susfs:
         description: "禁用 SUSFS"
         required: true
@@ -278,7 +273,8 @@ jobs:
       use_networking: ${{ inputs.use_networking }}
       use_kpm: ${{ inputs.use_kpm }}
       use_rekernel: ${{ inputs.use_rekernel }}
-      droidspaces_cgroup_limits: ${{ inputs.droidspaces_cgroup_limits }}
+      # 本实验分支固定启用
+      droidspaces_cgroup_limits: true
       enable_susfs: ${{ !inputs.cancel_susfs && inputs.kernelsu_variant != 'None' && !(needs.preflight.outputs.android_version == 'android17' && needs.preflight.outputs.kernel_version == '6.18') }}
       supp_op: false
       zram_full_algo: ${{ inputs.zram_full_algo }}

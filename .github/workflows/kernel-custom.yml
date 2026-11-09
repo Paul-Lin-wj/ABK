@@ -134,11 +134,6 @@ on:
         required: false
         type: boolean
         default: false
-      droidspaces_cgroup_limits:
-        description: "启用 cgroup 限额 kABI 补丁（Droidspaces CPU/进程数限制）"
-        required: false
-        type: boolean
-        default: false
       cancel_susfs:
         description: "禁用 SUSFS（android17/6.18 会自动禁用：susfs4ksu 暂无 6.18 分支）"
         required: true
@@ -204,7 +199,8 @@ jobs:
       use_networking: ${{ inputs.use_networking || false }}
       use_kpm: ${{ inputs.use_kpm }}
       use_rekernel: ${{ inputs.use_rekernel || false }}
-      droidspaces_cgroup_limits: ${{ inputs.droidspaces_cgroup_limits || false }}
+      # 本实验分支固定启用，见 build.yml「应用 cgroup 限额 kABI 补丁」
+      droidspaces_cgroup_limits: true
       supp_op: ${{ (inputs.supp_op || false) && !(inputs.android_version == 'android17' && inputs.kernel_version == '6.18') }}
       enable_susfs: ${{ !(inputs.cancel_susfs || (inputs.android_version == 'android17' && inputs.kernel_version == '6.18')) }}
       virtualization_support: ${{ inputs.virtualization_support || 'off' }}
