@@ -117,6 +117,10 @@ on:
         required: false
         type: boolean
         default: false
+      droidspaces_cgroup_limits:
+        required: false
+        type: boolean
+        default: false
       enable_susfs:
         required: false
         type: boolean
@@ -4171,6 +4175,66 @@ jobs:
           if [ "$executed" -eq 0 ]; then
             echo "没有配置 $CUSTOM_EXTERNAL_MODULE_STAGE 阶段的自定义外部模块。"
           fi
+
+      # 实验分支 exp/cgroup-limits-droidspaces 新增。上游 ABK 不提供此项。
+      # CONFIG_CFS_BANDWIDTH / CONFIG_CGROUP_PIDS 在 KMI 冻结时为 n，开启会改变
+      # cfs_rq / task_group 布局与约四千个导出符号校验和。此处应用 Droidspaces 作者的
+      # kABI 补丁：pids 子系统追加到 CGROUP_SUBSYS_COUNT 之后，cfs_bandwidth 状态
+      # 移到 task_group 尾部独立分配，task_group 的 KABI reserve 不占用。
+      - name: 应用 cgroup 限额 kABI 补丁 (Droidspaces)
+        if: inputs.droidspaces_cgroup_limits
+        env:
+          ABK_FEATURE_ID: cgroup_limits
+          ABK_FEATURE_END: "true"
+          ABK_FEATURE_FAILURE_MESSAGE: "cgroup limits kABI patch failed"
+        working-directory: ${{ env.KERNEL_ROOT }}/common
+        run: |
+          set -euo pipefail
+
+          KERNEL_VER="${{ inputs.kernel_version }}"
+          PATCH_DIR=/tmp/Droidspaces_Kernel_patch/cgroup_limits
+
+          case "$KERNEL_VER" in
+            6.1) PATCH="$PATCH_DIR/fix_cgroup_limits_kabi_6.1.141.patch" ;;
+            6.6) PATCH="$PATCH_DIR/fix_cgroup_limits_kabi_6.6.89.patch" ;;
+            6.12) PATCH="$PATCH_DIR/fix_cgroup_limits_kabi_6.12.23.patch" ;;
+            *) echo "::error::cgroup 限额补丁未适配内核 $KERNEL_VER"; exit 1 ;;
+          esac
+
+          [ -f "$PATCH" ] || { echo "::error::缺少补丁文件: $PATCH"; exit 1; }
+          echo "应用 cgroup 限额 kABI 补丁: $(basename "$PATCH")"
+
+          # 上游补丁基于 6.1.141 上下文书写，6.1.118 上存在 20~60 行 offset，
+          # 仅 sched.h 一处 fuzz 2。这里只允许 offset/fuzz，不允许任何 reject。
+          if ! patch -p1 --forward --dry-run < "$PATCH" > /tmp/cgroup_patch_dryrun.log 2>&1; then
+            echo "::error::cgroup 限额补丁无法干净应用"
+            grep -E "FAILED|Reversed" /tmp/cgroup_patch_dryrun.log || tail -30 /tmp/cgroup_patch_dryrun.log
+            exit 1
+          fi
+          grep -E "fuzz|offset" /tmp/cgroup_patch_dryrun.log || true
+          patch -p1 --forward < "$PATCH"
+
+          # 幂等写入 defconfig；stock_defconfig 存在时同步写入，
+          # 否则 /proc/config.gz 仍会显示旧值。
+          for cfg in "$DEFCONFIG" "$(dirname "$DEFCONFIG")/stock_defconfig"; do
+            [ -f "$cfg" ] || continue
+            for opt in CONFIG_CFS_BANDWIDTH CONFIG_CGROUP_PIDS; do
+              if grep -qxF "$opt=y" "$cfg"; then
+                continue
+              elif grep -qxF "# $opt is not set" "$cfg"; then
+                sed -i "s|^# $opt is not set$|$opt=y|" "$cfg"
+              elif grep -qE "^$opt=" "$cfg"; then
+                sed -i "s|^$opt=.*$|$opt=y|" "$cfg"
+              else
+                echo "$opt=y" >> "$cfg"
+              fi
+            done
+            echo "已启用 CFS_BANDWIDTH/CGROUP_PIDS: $cfg"
+          done
+
+          grep -qxF "CONFIG_CFS_BANDWIDTH=y" "$DEFCONFIG" || { echo "::error::CFS_BANDWIDTH 写入失败"; exit 1; }
+          grep -qxF "CONFIG_CGROUP_PIDS=y" "$DEFCONFIG" || { echo "::error::CGROUP_PIDS 写入失败"; exit 1; }
+          echo "cgroup 限额集成完成"
 
       - name: 配置内核选项
         working-directory: ${{ env.KERNEL_ROOT }}
