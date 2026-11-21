@@ -4225,7 +4225,15 @@ jobs:
 
           case "$KERNEL_VER" in
             6.1) PATCH="$PATCH_DIR/fix_cgroup_limits_kabi_6.1.141.patch" ;;
-            6.6) PATCH="$PATCH_DIR/fix_cgroup_limits_kabi_6.6.89.patch" ;;
+            6.6)
+              if [ "${{ inputs.sub_level }}" = "118" ]; then
+                # 上游补丁面向 OKI 6.6.89；此移植版保留 GKI 6.6.118 的
+                # CSS_COUNTERS_SIZE / CGROUP_ROOT_BACKPORT_PADDING_SIZE 定义。
+                PATCH="$GITHUB_WORKSPACE/.github/patches/fix_cgroup_limits_kabi_gki_6.6.118.patch"
+              else
+                PATCH="$PATCH_DIR/fix_cgroup_limits_kabi_6.6.89.patch"
+              fi
+              ;;
             6.12) PATCH="$PATCH_DIR/fix_cgroup_limits_kabi_6.12.23.patch" ;;
             *) echo "::error::cgroup 限额补丁未适配内核 $KERNEL_VER"; exit 1 ;;
           esac
